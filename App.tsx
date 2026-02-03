@@ -52,26 +52,35 @@ const App: React.FC = () => {
 
   const t = translations[lang] || translations.en;
 
+  const isPlaceholderKey = (key?: string) => {
+    return !key || key === 'undefined' || key === 'PLACEHOLDER_API_KEY' || key.includes("YOUR_API_KEY") || key.length < 10;
+  };
+
   useEffect(() => {
     const checkKey = async () => {
-      // Use any casting for window.aistudio to avoid environment-specific type conflicts.
-      // The type AIStudio is expected to be pre-defined in the environment.
       const aistudio = (window as any).aistudio;
       if (aistudio) {
         const selected = await aistudio.hasSelectedApiKey();
-        setHasKey(selected || !!process.env.API_KEY);
+        const envKey = process.env.API_KEY || (process.env as any).GEMINI_API_KEY;
+        setHasKey(selected || !isPlaceholderKey(envKey));
+      } else {
+        const envKey = process.env.API_KEY || (process.env as any).GEMINI_API_KEY;
+        setHasKey(!isPlaceholderKey(envKey));
       }
     };
     checkKey();
   }, []);
 
   const handleConnectKey = async () => {
-    // Use any casting for window.aistudio to avoid environment-specific type conflicts.
     const aistudio = (window as any).aistudio;
     if (aistudio) {
       await aistudio.openSelectKey();
+      // 指南要求：假设选择成功并继续
       setHasKey(true);
-      runDiagnostic();
+      setDiagStatus('IDLE');
+      setDiagMsg('密钥配置重置。请重新运行诊断。');
+    } else {
+      alert("当前环境不支持自动 Key 选择器。请在托管平台（如 Netlify）手动配置 API_KEY 环境变量。");
     }
   };
 
@@ -81,11 +90,16 @@ const App: React.FC = () => {
     if (result.success) {
       setDiagStatus('SUCCESS');
       setDiagMsg(result.message);
+      setHasKey(true);
     } else {
       setDiagStatus('ERROR');
       setDiagMsg(result.message);
-      if (result.message.includes("not found")) {
+      
+      // 如果触发了重置标志（404 或无效 KEY），自动弹出选择框
+      if ((result as any).shouldResetKey) {
         setHasKey(false);
+        // 延迟一秒方便用户看清错误信息
+        setTimeout(handleConnectKey, 1000);
       }
     }
   };
@@ -153,7 +167,7 @@ const App: React.FC = () => {
         <div className="absolute bottom-32 left-8 right-8 cursor-pointer group" onClick={() => setActiveTab('sync')}>
            <div className="p-4 glass rounded-2xl border-slate-800/60 bg-slate-900/30 group-hover:bg-slate-800/50 transition-colors">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Network Status</span>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">网络状态</span>
                 <span className={`flex h-1.5 w-1.5 rounded-full ${hasKey ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`}></span>
               </div>
               <p className="text-[10px] text-slate-400 font-medium">{hasKey ? 'Cognitive Engine Connected' : 'Engine Offline: Key Required'}</p>
@@ -184,7 +198,7 @@ const App: React.FC = () => {
           <div className="flex items-center space-x-6">
              <div className={`flex items-center px-4 py-1.5 ${hasKey ? 'bg-emerald-500/5 text-emerald-500 border-emerald-500/10' : 'bg-red-500/5 text-red-500 border-red-500/10'} border rounded-full text-[10px] font-black uppercase tracking-widest`}>
                <span className={`w-2 h-2 rounded-full ${hasKey ? 'bg-emerald-500' : 'bg-red-500'} mr-2 animate-pulse`} />
-               {hasKey ? t.status : "API KEY DISCONNECTED"}
+               {hasKey ? t.status : "引擎配置异常"}
              </div>
           </div>
 
@@ -205,10 +219,10 @@ const App: React.FC = () => {
             {!hasKey && (
               <button 
                 onClick={handleConnectKey}
-                className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/40"
+                className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/40 animate-pulse"
               >
                 <Key className="w-4 h-4" />
-                <span>Connect API Key</span>
+                <span>连接有效 API Key</span>
               </button>
             )}
 
@@ -231,7 +245,7 @@ const App: React.FC = () => {
                   {[
                     { label: t.riskIndices, value: '14', change: 'Live', icon: Shield, color: 'text-blue-400' },
                     { label: t.powerNodes, value: '42', change: 'Active', icon: Zap, color: 'text-[#d4af37]' },
-                    { label: t.protocolIntegrity, value: hasKey ? '98%' : '0%', change: hasKey ? 'Nominal' : 'Offline', icon: RefreshCw, color: hasKey ? 'text-emerald-400' : 'text-red-400' },
+                    { label: t.protocolIntegrity, value: hasKey ? '98%' : '0%', change: hasKey ? 'Nominal' : 'Config Error', icon: RefreshCw, color: hasKey ? 'text-emerald-400' : 'text-red-400' },
                     { label: t.evolutionProgress, value: '35%', change: '+1.2%', icon: Map, color: 'text-purple-400' },
                   ].map((stat, i) => (
                     <div key={i} className="glass p-8 rounded-[2rem] border-slate-800/60 hover:border-slate-700 transition-all group hover:bg-slate-800/30">
@@ -248,17 +262,22 @@ const App: React.FC = () => {
                 </div>
 
                 {!hasKey && (
-                  <div className="glass p-10 rounded-[2.5rem] border-red-500/20 bg-red-500/5 flex flex-col md:flex-row items-center justify-between gap-8">
+                  <div className="glass p-10 rounded-[2.5rem] border-red-500/20 bg-red-500/5 flex flex-col md:flex-row items-center justify-between gap-8 border-2 animate-in slide-in-from-top-4">
                     <div className="space-y-4 text-center md:text-left">
-                       <h2 className="text-3xl font-black text-white tracking-tighter">Cognitive Engine <span className="text-red-500">Offline</span></h2>
-                       <p className="text-slate-400 max-w-lg">Polaris OS requires a secure connection to the Gemini Intelligence Layer. Your API Key is currently missing or invalid.</p>
+                       <h2 className="text-3xl font-black text-white tracking-tighter flex items-center gap-3">
+                         <AlertTriangle className="text-red-500 w-8 h-8" />
+                         认知引擎 <span className="text-red-500">协议受阻</span>
+                       </h2>
+                       <p className="text-slate-400 max-w-lg font-medium">
+                         当前项目未获得模型访问授权（错误 404）。请使用下方按钮通过 AI Studio 连接一个开启了计费（Billing Enabled）的 Google Cloud 项目。
+                       </p>
                     </div>
                     <button 
                       onClick={handleConnectKey}
                       className="px-10 py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-2xl shadow-blue-900/40 flex items-center gap-3 active:scale-95"
                     >
                       <Key className="w-5 h-5" />
-                      Securely Connect API Key
+                      重新关联付费项目
                     </button>
                   </div>
                 )}
@@ -266,28 +285,28 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                   <div className="lg:col-span-2 space-y-10">
                      {/* System Diagnostic Widget */}
-                     <div className="glass p-10 rounded-[2.5rem] border-slate-800 bg-slate-950/40 relative overflow-hidden group">
+                     <div className={`glass p-10 rounded-[2.5rem] border-2 transition-all ${diagStatus === 'ERROR' ? 'border-red-500/30' : 'border-slate-800'} bg-slate-950/40 relative overflow-hidden group`}>
                         <div className="flex justify-between items-start mb-8">
                           <div className="flex items-center gap-3">
                             <Terminal className="w-5 h-5 text-blue-400" />
-                            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">System Diagnostic</h3>
+                            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">系统诊断中心</h3>
                           </div>
                           {diagStatus === 'SUCCESS' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                          {diagStatus === 'ERROR' && <AlertTriangle className="w-5 h-5 text-red-500" />}
+                          {diagStatus === 'ERROR' && <AlertTriangle className="w-5 h-5 text-red-500 animate-bounce" />}
                         </div>
                         
-                        <div className="space-y-6">
+                        <div className="space-y-6 relative z-10">
                            <p className="text-sm text-slate-400 leading-relaxed max-w-md">
-                             Verify API key connectivity and protocol synchronization status. Run this diagnostic to confirm Gemini API is reachable.
+                             404 错误通常意味着模型对当前 API Key 不可用。Polaris 将尝试重新对齐协议。
                            </p>
                            
                            {diagStatus !== 'IDLE' && (
                              <div className={`p-4 rounded-xl border font-mono text-[10px] ${
                                diagStatus === 'SUCCESS' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 
-                               diagStatus === 'ERROR' ? 'bg-red-500/5 border-red-500/20 text-red-400' : 'bg-blue-500/5 border-blue-500/20 text-blue-400'
+                               diagStatus === 'ERROR' ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-blue-500/5 border-blue-500/20 text-blue-400'
                              }`}>
-                               <p className="font-black mb-1">RAW OUTPUT:</p>
-                               {diagMsg || "Waiting for packet..."}
+                               <p className="font-black mb-1 uppercase tracking-widest">诊断报告:</p>
+                               {diagMsg || "探测信号中..."}
                              </div>
                            )}
 
@@ -298,16 +317,16 @@ const App: React.FC = () => {
                                className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/30 flex items-center gap-2"
                              >
                                {diagStatus === 'LOADING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
-                               {diagStatus === 'LOADING' ? 'Testing Connectivity...' : 'Run System Diagnostic'}
+                               {diagStatus === 'LOADING' ? '分析中...' : '开始全局诊断'}
                              </button>
                              
-                             <a 
-                               href="https://ai.google.dev/gemini-api/docs/billing" 
-                               target="_blank"
-                               className="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all"
+                             <button 
+                               onClick={handleConnectKey}
+                               className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
                              >
-                               Billing Info
-                             </a>
+                               <Key className="w-4 h-4" />
+                               强制重置 Key 缓存
+                             </button>
                            </div>
                         </div>
                         <div className="absolute -right-10 -bottom-10 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity">
@@ -322,10 +341,10 @@ const App: React.FC = () => {
                             <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500/80">Reflexive Engine: Standing By</span>
                           </div>
                           <h2 className="text-4xl font-black tracking-tighter text-white">Self-Correcting Sovereignty</h2>
-                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">Your OS evolves with every reality check. Calibrate your predictions to refine your strategic protocols.</p>
+                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">你的操作系统会随着每次“现实核查”而进化。校准预测以优化战略协议。</p>
                           <div className="flex gap-4">
-                            <button onClick={() => setActiveTab('reflexive')} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-900/30">Enter Calibration Hub</button>
-                            <button onClick={() => setActiveTab('resonance')} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">Execute Ripple Scan</button>
+                            <button onClick={() => setActiveTab('reflexive')} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-900/30">进入校准中心</button>
+                            <button onClick={() => setActiveTab('resonance')} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">执行涟漪扫描</button>
                           </div>
                         </div>
                         <RefreshCcw className="absolute -right-20 -bottom-20 w-80 h-80 text-emerald-500/5 rotate-12" />
@@ -357,19 +376,19 @@ const App: React.FC = () => {
                       <div className="absolute top-0 right-0 p-4 opacity-10">
                         <RefreshCcw className="w-20 h-20 text-emerald-400" />
                       </div>
-                      <h3 className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-6">Cognitive Calibration</h3>
+                      <h3 className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-6">认知自动校准</h3>
                       <div className="space-y-4">
                         <div className="flex justify-between items-end border-b border-emerald-500/10 pb-2">
-                           <span className="text-[10px] text-slate-500 font-bold uppercase">System Error Rate</span>
+                           <span className="text-[10px] text-slate-500 font-bold uppercase">系统误差率</span>
                            <span className="text-xs font-black text-emerald-300">12.4% (-2%)</span>
                         </div>
                         <div className="flex justify-between items-end border-b border-emerald-500/10 pb-2">
-                           <span className="text-[10px] text-slate-500 font-bold uppercase">Bias Correction</span>
-                           <span className="text-xs font-black text-emerald-300">ACTIVE</span>
+                           <span className="text-[10px] text-slate-500 font-bold uppercase">偏差修正</span>
+                           <span className="text-xs font-black text-emerald-300">活跃 (Active)</span>
                         </div>
                       </div>
                       <p className="text-[9px] text-slate-600 mt-6 leading-relaxed italic">
-                        Every reality check improves the OS weights. High Learning Velocity detected.
+                        每次现实核查都会提高 OS 权重。检测到高速学习速率。
                       </p>
                     </div>
                   </div>
