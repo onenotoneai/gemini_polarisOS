@@ -1,31 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  Shield, 
-  Zap, 
-  Map, 
-  Library, 
-  BookOpen, 
-  LayoutDashboard,
-  Menu,
-  X,
-  User as UserIcon,
-  Settings,
-  Bell,
-  LogOut,
-  Globe,
-  Share2,
-  Activity,
-  RefreshCw,
-  Waves,
-  RefreshCcw,
-  Terminal,
-  AlertTriangle,
-  CheckCircle2,
-  Loader2,
-  Link,
-  Key
+  Shield, Zap, Map, Library, BookOpen, LayoutDashboard, Menu, X, 
+  User as UserIcon, LogOut, Globe, Activity, RefreshCw, Waves, 
+  RefreshCcw, Terminal, AlertTriangle, CheckCircle2, Loader2, Key, Database, Cloud
 } from 'lucide-react';
+import { supabase } from './supabaseClient';
 import WindowGuard from './components/WindowGuard';
 import GameLab from './components/GameLab';
 import Roadmap from './components/Roadmap';
@@ -45,6 +25,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [user, setUser] = useState<User | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [lang, setLang] = useState('cn');
   const [diagStatus, setDiagStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [diagMsg, setDiagMsg] = useState('');
@@ -52,55 +33,65 @@ const App: React.FC = () => {
 
   const t = translations[lang] || translations.en;
 
-  const isPlaceholderKey = (key?: string) => {
-    return !key || key === 'undefined' || key === 'PLACEHOLDER_API_KEY' || key.includes("YOUR_API_KEY") || key.length < 10;
-  };
-
   useEffect(() => {
-    const checkKey = async () => {
-      const aistudio = (window as any).aistudio;
-      if (aistudio) {
-        const selected = await aistudio.hasSelectedApiKey();
-        const envKey = process.env.API_KEY || (process.env as any).GEMINI_API_KEY;
-        setHasKey(selected || !isPlaceholderKey(envKey));
-      } else {
-        const envKey = process.env.API_KEY || (process.env as any).GEMINI_API_KEY;
-        setHasKey(!isPlaceholderKey(envKey));
+    // 监听 Supabase 登录状态，添加 catch 防止配置错误导致的挂起
+    const initSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        
+        if (session) {
+          const u = session.user;
+          setUser({
+            id: u.id,
+            name: u.user_metadata.full_name || u.email?.split('@')[0] || 'Unknown User',
+            email: u.email || '',
+            picture: u.user_metadata.avatar_url || '',
+            role: 'Executive'
+          });
+        }
+      } catch (err) {
+        console.error("Supabase Session Init Failed (Likely missing or invalid keys):", err);
+      } finally {
+        setSessionLoading(false);
       }
     };
-    checkKey();
+
+    initSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        const u = session.user;
+        setUser({
+          id: u.id,
+          name: u.user_metadata.full_name || u.email?.split('@')[0] || 'Unknown User',
+          email: u.email || '',
+          picture: u.user_metadata.avatar_url || '',
+          role: 'Executive'
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Logout failed", err);
+      setUser(null); // 强制本地登出
+    }
+  };
 
   const handleConnectKey = async () => {
     const aistudio = (window as any).aistudio;
     if (aistudio) {
       await aistudio.openSelectKey();
-      // 指南要求：假设选择成功并继续
       setHasKey(true);
       setDiagStatus('IDLE');
-      setDiagMsg('密钥配置重置。请重新运行诊断。');
-    } else {
-      alert("当前环境不支持自动 Key 选择器。请在托管平台（如 Netlify）手动配置 API_KEY 环境变量。");
-    }
-  };
-
-  const runDiagnostic = async () => {
-    setDiagStatus('LOADING');
-    const result = await testApiKeyConnectivity();
-    if (result.success) {
-      setDiagStatus('SUCCESS');
-      setDiagMsg(result.message);
-      setHasKey(true);
-    } else {
-      setDiagStatus('ERROR');
-      setDiagMsg(result.message);
-      
-      // 如果触发了重置标志（404 或无效 KEY），自动弹出选择框
-      if ((result as any).shouldResetKey) {
-        setHasKey(false);
-        // 延迟一秒方便用户看清错误信息
-        setTimeout(handleConnectKey, 1000);
-      }
     }
   };
 
@@ -115,6 +106,15 @@ const App: React.FC = () => {
     { id: 'playbook' as Tab, label: t.playbook, icon: BookOpen },
     { id: 'sync' as Tab, label: t.sync, icon: RefreshCw },
   ];
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Initializing Lattice Session...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
@@ -139,7 +139,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tighter text-white">Polaris <span className="text-blue-500">OS</span></h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">Cognitive OS</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">Sovereign Cloud v3.0</p>
             </div>
           </div>
 
@@ -164,13 +164,15 @@ const App: React.FC = () => {
           </nav>
         </div>
 
-        <div className="absolute bottom-32 left-8 right-8 cursor-pointer group" onClick={() => setActiveTab('sync')}>
+        <div className="absolute bottom-32 left-8 right-8 cursor-pointer group">
            <div className="p-4 glass rounded-2xl border-slate-800/60 bg-slate-900/30 group-hover:bg-slate-800/50 transition-colors">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">网络状态</span>
-                <span className={`flex h-1.5 w-1.5 rounded-full ${hasKey ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`}></span>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                   <Cloud className="w-2 h-2" /> 云端状态
+                </span>
+                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">{hasKey ? 'Cognitive Engine Connected' : 'Engine Offline: Key Required'}</p>
+              <p className="text-[10px] text-slate-400 font-medium">Supabase Persistence Active</p>
            </div>
         </div>
 
@@ -183,7 +185,7 @@ const App: React.FC = () => {
                 <p className="text-xs font-bold text-white truncate">{user.name}</p>
                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{user.role}</p>
              </div>
-             <LogOut className="w-4 h-4 text-slate-600 hover:text-red-400 cursor-pointer transition-colors" onClick={() => setUser(null)} />
+             <LogOut className="w-4 h-4 text-slate-600 hover:text-red-400 cursor-pointer transition-colors" onClick={handleLogout} />
           </div>
         </div>
       </aside>
@@ -194,38 +196,27 @@ const App: React.FC = () => {
           <button className="lg:hidden p-2 text-slate-400" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
             {isSidebarOpen ? <X /> : <Menu />}
           </button>
-          
           <div className="flex items-center space-x-6">
              <div className={`flex items-center px-4 py-1.5 ${hasKey ? 'bg-emerald-500/5 text-emerald-500 border-emerald-500/10' : 'bg-red-500/5 text-red-500 border-red-500/10'} border rounded-full text-[10px] font-black uppercase tracking-widest`}>
                <span className={`w-2 h-2 rounded-full ${hasKey ? 'bg-emerald-500' : 'bg-red-500'} mr-2 animate-pulse`} />
                {hasKey ? t.status : "引擎配置异常"}
              </div>
           </div>
-
           <div className="flex items-center space-x-6">
             <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-xl border-slate-700/50">
               <Globe className="w-3.5 h-3.5 text-slate-500" />
-              <select 
-                value={lang} 
-                onChange={(e) => setLang(e.target.value)}
-                className="bg-transparent text-[10px] font-black text-slate-400 uppercase outline-none cursor-pointer"
-              >
+              <select value={lang} onChange={(e) => setLang(e.target.value)} className="bg-transparent text-[10px] font-black text-slate-400 uppercase outline-none cursor-pointer">
                 <option value="cn">中文</option>
                 <option value="en">English</option>
                 <option value="jp">日本語</option>
               </select>
             </div>
-            
             {!hasKey && (
-              <button 
-                onClick={handleConnectKey}
-                className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/40 animate-pulse"
-              >
+              <button onClick={handleConnectKey} className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/40 animate-pulse">
                 <Key className="w-4 h-4" />
                 <span>连接有效 API Key</span>
               </button>
             )}
-
             <button onClick={() => setActiveTab('resonance')} className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/20 active:scale-95">
               <Waves className="w-4 h-4" />
               <span>{t.resonance || "Ripple Engine"}</span>
@@ -235,12 +226,9 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto p-10 custom-scrollbar relative">
           <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-transparent pointer-events-none" />
-          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 pointer-events-none" />
-          
           <div className="relative z-10 max-w-7xl mx-auto">
             {activeTab === 'dashboard' && (
               <div className="space-y-10 animate-in fade-in duration-700">
-                {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {[
                     { label: t.riskIndices, value: '14', change: 'Live', icon: Shield, color: 'text-blue-400' },
@@ -261,137 +249,36 @@ const App: React.FC = () => {
                   ))}
                 </div>
 
-                {!hasKey && (
-                  <div className="glass p-10 rounded-[2.5rem] border-red-500/20 bg-red-500/5 flex flex-col md:flex-row items-center justify-between gap-8 border-2 animate-in slide-in-from-top-4">
-                    <div className="space-y-4 text-center md:text-left">
-                       <h2 className="text-3xl font-black text-white tracking-tighter flex items-center gap-3">
-                         <AlertTriangle className="text-red-500 w-8 h-8" />
-                         认知引擎 <span className="text-red-500">协议受阻</span>
-                       </h2>
-                       <p className="text-slate-400 max-w-lg font-medium">
-                         当前项目未获得模型访问授权（错误 404）。请使用下方按钮通过 AI Studio 连接一个开启了计费（Billing Enabled）的 Google Cloud 项目。
-                       </p>
-                    </div>
-                    <button 
-                      onClick={handleConnectKey}
-                      className="px-10 py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-2xl shadow-blue-900/40 flex items-center gap-3 active:scale-95"
-                    >
-                      <Key className="w-5 h-5" />
-                      重新关联付费项目
-                    </button>
-                  </div>
-                )}
-
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                  <div className="lg:col-span-2 space-y-10">
-                     {/* System Diagnostic Widget */}
-                     <div className={`glass p-10 rounded-[2.5rem] border-2 transition-all ${diagStatus === 'ERROR' ? 'border-red-500/30' : 'border-slate-800'} bg-slate-950/40 relative overflow-hidden group`}>
-                        <div className="flex justify-between items-start mb-8">
-                          <div className="flex items-center gap-3">
-                            <Terminal className="w-5 h-5 text-blue-400" />
-                            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">系统诊断中心</h3>
-                          </div>
-                          {diagStatus === 'SUCCESS' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                          {diagStatus === 'ERROR' && <AlertTriangle className="w-5 h-5 text-red-500 animate-bounce" />}
-                        </div>
-                        
-                        <div className="space-y-6 relative z-10">
-                           <p className="text-sm text-slate-400 leading-relaxed max-w-md">
-                             404 错误通常意味着模型对当前 API Key 不可用。Polaris 将尝试重新对齐协议。
-                           </p>
-                           
-                           {diagStatus !== 'IDLE' && (
-                             <div className={`p-4 rounded-xl border font-mono text-[10px] ${
-                               diagStatus === 'SUCCESS' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 
-                               diagStatus === 'ERROR' ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-blue-500/5 border-blue-500/20 text-blue-400'
-                             }`}>
-                               <p className="font-black mb-1 uppercase tracking-widest">诊断报告:</p>
-                               {diagMsg || "探测信号中..."}
-                             </div>
-                           )}
-
-                           <div className="flex gap-4">
-                             <button 
-                               onClick={runDiagnostic}
-                               disabled={diagStatus === 'LOADING'}
-                               className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/30 flex items-center gap-2"
-                             >
-                               {diagStatus === 'LOADING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
-                               {diagStatus === 'LOADING' ? '分析中...' : '开始全局诊断'}
-                             </button>
-                             
-                             <button 
-                               onClick={handleConnectKey}
-                               className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
-                             >
-                               <Key className="w-4 h-4" />
-                               强制重置 Key 缓存
-                             </button>
-                           </div>
-                        </div>
-                        <div className="absolute -right-10 -bottom-10 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity">
-                          <Terminal className="w-40 h-40" />
-                        </div>
-                     </div>
-
-                     <div className="glass p-10 rounded-[2.5rem] relative overflow-hidden bg-gradient-to-br from-emerald-600/10 via-slate-900/40 to-transparent border-slate-800/60">
+                   <div className="lg:col-span-2 space-y-10">
+                      <div className="glass p-10 rounded-[2.5rem] relative overflow-hidden bg-gradient-to-br from-indigo-600/10 via-slate-900/40 to-transparent border-slate-800/60 group">
                         <div className="relative z-10 space-y-6">
                           <div className="flex items-center gap-3">
-                            <RefreshCcw className="w-5 h-5 text-emerald-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500/80">Reflexive Engine: Standing By</span>
+                            <Cloud className="w-5 h-5 text-blue-400 animate-bounce" />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-blue-500/80">Sovereign Data Storage v1.0</span>
                           </div>
-                          <h2 className="text-4xl font-black tracking-tighter text-white">Self-Correcting Sovereignty</h2>
-                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">你的操作系统会随着每次“现实核查”而进化。校准预测以优化战略协议。</p>
+                          <h2 className="text-4xl font-black tracking-tighter text-white">Your Intelligence, <span className="text-blue-500">Decentralized.</span></h2>
+                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">你的所有战略扫描和权力地图现在都存储在主权云端，跨平台实时同步。</p>
                           <div className="flex gap-4">
-                            <button onClick={() => setActiveTab('reflexive')} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-900/30">进入校准中心</button>
-                            <button onClick={() => setActiveTab('resonance')} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">执行涟漪扫描</button>
+                            <button onClick={() => setActiveTab('scanner')} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/30">开始云端扫描</button>
+                            <button onClick={() => setActiveTab('reflexive')} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">访问历史档案</button>
                           </div>
                         </div>
-                        <RefreshCcw className="absolute -right-20 -bottom-20 w-80 h-80 text-emerald-500/5 rotate-12" />
-                     </div>
-                  </div>
-
-                  <div className="space-y-10">
-                    <div className="glass p-10 rounded-[2.5rem] border-slate-800 bg-slate-900/20">
+                        <Database className="absolute -right-20 -bottom-20 w-80 h-80 text-blue-500/5 -rotate-12 group-hover:text-blue-500/10 transition-colors" />
+                      </div>
+                   </div>
+                   <div className="glass p-10 rounded-[2.5rem] border-slate-800 bg-slate-900/20">
                       <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-8">{t.hazardsTitle}</h3>
                       <div className="space-y-6">
-                        <div className="p-6 bg-red-500/5 border border-red-500/10 rounded-3xl flex items-start gap-4 hover:bg-red-500/10 transition-colors">
+                        <div className="p-6 bg-red-500/5 border border-red-500/10 rounded-3xl flex items-start gap-4">
                           <Shield className="w-6 h-6 text-red-500 shrink-0 mt-1" />
                           <div>
                             <p className="text-sm font-black text-red-400 uppercase tracking-tight">{t.sovereigntyWarning}</p>
                             <p className="text-xs text-slate-500 mt-2 leading-relaxed">{t.hazardDesc1}</p>
                           </div>
                         </div>
-                        <div className="p-6 bg-amber-500/5 border border-amber-500/10 rounded-3xl flex items-start gap-4 hover:bg-amber-500/10 transition-colors">
-                          <Zap className="w-6 h-6 text-amber-500 shrink-0 mt-1" />
-                          <div>
-                            <p className="text-sm font-black text-amber-400 uppercase tracking-tight">{t.chronicWarning}</p>
-                            <p className="text-xs text-slate-500 mt-2 leading-relaxed">{t.hazardDesc2}</p>
-                          </div>
-                        </div>
                       </div>
-                    </div>
-
-                    <div className="glass p-10 rounded-[2.5rem] bg-emerald-950/20 border border-emerald-500/10 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 p-4 opacity-10">
-                        <RefreshCcw className="w-20 h-20 text-emerald-400" />
-                      </div>
-                      <h3 className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-6">认知自动校准</h3>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-end border-b border-emerald-500/10 pb-2">
-                           <span className="text-[10px] text-slate-500 font-bold uppercase">系统误差率</span>
-                           <span className="text-xs font-black text-emerald-300">12.4% (-2%)</span>
-                        </div>
-                        <div className="flex justify-between items-end border-b border-emerald-500/10 pb-2">
-                           <span className="text-[10px] text-slate-500 font-bold uppercase">偏差修正</span>
-                           <span className="text-xs font-black text-emerald-300">活跃 (Active)</span>
-                        </div>
-                      </div>
-                      <p className="text-[9px] text-slate-600 mt-6 leading-relaxed italic">
-                        每次现实核查都会提高 OS 权重。检测到高速学习速率。
-                      </p>
-                    </div>
-                  </div>
+                   </div>
                 </div>
               </div>
             )}

@@ -1,26 +1,42 @@
 
-import React, { useState } from 'react';
-import { Target, Brain, ArrowRight, CheckCircle2, AlertCircle, RefreshCcw, TrendingUp, History, Sparkles, Binary, ExternalLink, Link as LinkIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Target, Brain, ArrowRight, CheckCircle2, AlertCircle, RefreshCcw, TrendingUp, History, Sparkles, Binary, ExternalLink, Link as LinkIcon, Trash2 } from 'lucide-react';
 import { calibrateProtocol } from '../geminiService';
 import { Prediction } from '../types';
 
 const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
-  const [predictions, setPredictions] = useState<Prediction[]>([
-    {
-      id: 'p1',
-      timestamp: '2024-11-20',
-      event: 'Trump Tariff Announcement (Proposed)',
-      ripples: [
-        { order: 1, impact: 'Sudden spike in logistic costs', probability: 0.9 },
-        { order: 2, impact: 'Rapid reshoring to Mexico', probability: 0.7 }
-      ],
-      status: 'PENDING'
-    }
-  ]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [realityInput, setRealityInput] = useState('');
   const [calibratingId, setCalibratingId] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [groundingLinks, setGroundingLinks] = useState<any[]>([]);
+
+  // 初始化加载历史预测
+  useEffect(() => {
+    const saved = localStorage.getItem('polaris_predictions');
+    if (saved) {
+      setPredictions(JSON.parse(saved));
+    } else {
+      // 默认示例
+      setPredictions([{
+        id: 'p1',
+        timestamp: '2024-11-20',
+        event: 'Trump Tariff Announcement (Proposed)',
+        ripples: [
+          { order: 1, impact: 'Sudden spike in logistic costs', probability: 0.9 },
+          { order: 2, impact: 'Rapid reshoring to Mexico', probability: 0.7 }
+        ],
+        status: 'PENDING'
+      }]);
+    }
+  }, []);
+
+  // 监听变化并保存
+  useEffect(() => {
+    if (predictions.length > 0) {
+      localStorage.setItem('polaris_predictions', JSON.stringify(predictions));
+    }
+  }, [predictions]);
 
   const handleCalibrate = async (pred: Prediction) => {
     if (!realityInput) return;
@@ -31,7 +47,6 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
       const calibration = response.data;
       setResult(calibration);
       
-      // Extract search grounding links
       if (response.grounding) {
         setGroundingLinks(response.grounding);
       }
@@ -43,11 +58,19 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
         calibrationDelta: calibration.calibrationDelta,
         insightExtracted: calibration.cognitiveCrystal.rule
       } : p));
+      setRealityInput('');
     } catch (err) {
       console.error(err);
       alert("Calibration failed. Check console for details.");
     } finally {
       setCalibratingId(null);
+    }
+  };
+
+  const clearPredictions = () => {
+    if (confirm("确定要清空推演历史吗？")) {
+      setPredictions([]);
+      localStorage.removeItem('polaris_predictions');
     }
   };
 
@@ -63,14 +86,13 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Self-Correcting Cognitive Loop</p>
           </div>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-4 items-center">
+           <button onClick={clearPredictions} className="p-2 text-slate-600 hover:text-red-400 transition-colors">
+              <Trash2 className="w-5 h-5" />
+           </button>
            <div className="px-6 py-2 glass rounded-xl border-slate-800 text-center">
               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Mean Error Rate</p>
               <p className="text-xl font-black text-emerald-400">12.4%</p>
-           </div>
-           <div className="px-6 py-2 glass rounded-xl border-slate-800 text-center">
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Learning Velocity</p>
-              <p className="text-xl font-black text-blue-400">Accelerating</p>
            </div>
         </div>
       </div>
@@ -81,8 +103,9 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
             <History className="w-4 h-4" /> Active Predictions
           </h3>
           <div className="space-y-4">
+            {predictions.length === 0 && <p className="text-slate-600 italic text-sm p-10 glass rounded-3xl text-center">No active predictions. Go to Ripple Engine to create one.</p>}
             {predictions.map(pred => (
-              <div key={pred.id} className={`glass p-8 rounded-[2.5rem] border-slate-800 transition-all ${pred.status === 'VERIFIED' ? 'bg-slate-900/20' : 'bg-slate-900/40'}`}>
+              <div key={pred.id} className={`glass p-8 rounded-[2.5rem] border-slate-800 transition-all ${pred.status === 'VERIFIED' ? 'bg-slate-900/20 shadow-inner' : 'bg-slate-900/40 shadow-xl'}`}>
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <span className="text-[10px] font-bold text-slate-500">{pred.timestamp}</span>
@@ -126,44 +149,16 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
                         <Sparkles className="w-5 h-5 text-emerald-400" />
                      </div>
 
-                     {result && result.thinkingTrace && (
-                       <div className="space-y-2">
-                         <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
-                           <Binary className="w-3 h-3" /> Logic Trace
-                         </p>
-                         <div className="space-y-2">
-                            {result.thinkingTrace.map((node: string, i: number) => (
-                              <div key={i} className="text-[10px] font-mono text-slate-500 flex gap-2">
-                                <span className="text-emerald-500">[{i+1}]</span> {node}
-                              </div>
-                            ))}
-                         </div>
-                       </div>
-                     )}
-
-                     {groundingLinks.length > 0 && (
-                       <div className="space-y-3 pt-4 border-t border-slate-800/40">
-                         <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
-                           <LinkIcon className="w-3 h-3" /> External Reality Verification Sources
-                         </p>
-                         <div className="grid grid-cols-1 gap-2">
-                           {groundingLinks.map((link, idx) => link.web && (
-                             <a 
-                               key={idx} 
-                               href={link.web.uri} 
-                               target="_blank" 
-                               rel="noopener noreferrer"
-                               className="flex items-center justify-between p-2 bg-slate-950/40 rounded-lg border border-slate-800 hover:border-indigo-500/50 transition-colors group"
-                             >
-                               <span className="text-[10px] text-slate-400 truncate max-w-[90%] font-medium">
-                                 {link.web.title || link.web.uri}
-                               </span>
-                               <ExternalLink className="w-3 h-3 text-slate-600 group-hover:text-indigo-400" />
-                             </a>
-                           ))}
-                         </div>
-                       </div>
-                     )}
+                     <div className="grid grid-cols-2 gap-4">
+                        <div className="p-3 bg-slate-950/40 rounded-xl border border-slate-800">
+                           <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Reality Outcome</p>
+                           <p className="text-[10px] text-slate-400 italic line-clamp-2">{pred.actualOutcome}</p>
+                        </div>
+                        <div className="p-3 bg-slate-950/40 rounded-xl border border-slate-800">
+                           <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Error Delta</p>
+                           <p className="text-xs font-black text-orange-400">{pred.calibrationDelta}%</p>
+                        </div>
+                     </div>
                   </div>
                 )}
               </div>
@@ -191,28 +186,10 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
                 </div>
               ) : (
                 <div className="py-20 text-center opacity-20">
-                  <RefreshCcw className="w-12 h-12 mx-auto mb-4 animate-spin-slow" />
-                  <p className="text-[10px] font-black uppercase tracking-widest">Awaiting Verification</p>
+                  <RefreshCcw className="w-12 h-12 mx-auto mb-4 animate-spin-slow text-slate-600" />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Awaiting Verification</p>
                 </div>
               )}
-           </div>
-
-           <div className="glass p-8 rounded-[2.5rem] bg-slate-900/40 border-slate-800">
-              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">Processing Path</h3>
-              <div className="space-y-4">
-                 <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-blue-500" />
-                    <span className="text-[10px] text-slate-400 font-bold">External Brain (Gemini 3 Flash)</span>
-                 </div>
-                 <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span className="text-[10px] text-slate-400 font-bold">Reality Sensor (Google Search)</span>
-                 </div>
-                 <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-amber-500" />
-                    <span className="text-[10px] text-slate-400 font-bold">Internal Anchor (Playbook v2)</span>
-                 </div>
-              </div>
            </div>
         </div>
       </div>

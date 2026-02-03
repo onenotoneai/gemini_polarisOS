@@ -1,27 +1,96 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { analyzeRisk } from '../geminiService';
-import { Shield, AlertTriangle, CheckCircle, Loader2, ArrowRight, Zap } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import { Shield, AlertTriangle, CheckCircle, Loader2, ArrowRight, Zap, History, Trash2, Cloud } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
 import { translations } from '../i18n';
 
 const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
   const [scenario, setScenario] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
 
   const t = translations[lang] || translations.en;
+
+  // 从 Supabase 加载历史记录
+  const fetchHistory = async () => {
+    setFetching(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('scans')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('timestamp', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      console.error("Supabase fetch error:", error);
+    } else if (data) {
+      setHistory(data);
+      if (!result && data.length > 0) setResult(data[0]);
+    }
+    setFetching(false);
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
 
   const handleScan = async () => {
     if (!scenario.trim()) return;
     setLoading(true);
     try {
       const data = await analyzeRisk(scenario);
-      setResult(data);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) throw new Error("User not found");
+
+      const newScanRecord = {
+        user_id: user.id,
+        scenario: scenario,
+        axes: data.axes,
+        risk_level: data.riskLevel,
+        summary: data.summary,
+        recommendations: data.recommendations
+      };
+
+      // 写入 Supabase
+      const { data: savedData, error } = await supabase
+        .from('scans')
+        .insert([newScanRecord])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setResult(savedData);
+      setHistory(prev => [savedData, ...prev].slice(0, 10));
     } catch (error) {
-      console.error(error);
+      console.error("Scan/Save failed:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const clearHistory = async () => {
+    if (window.confirm("确定要永久删除云端所有扫描记忆吗？")) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { error } = await supabase
+        .from('scans')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (!error) {
+        setHistory([]);
+        setResult(null);
+      }
     }
   };
 
@@ -42,25 +111,31 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto py-8">
-      <div className="flex items-center space-x-4 mb-4">
-        <div className="p-3 glass rounded-2xl bg-blue-600/10">
-          <Shield className="w-8 h-8 text-blue-400" />
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-4">
+          <div className="p-3 glass rounded-2xl bg-blue-600/10">
+            <Shield className="w-8 h-8 text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-white">{t.scanner}</h2>
+            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2">
+               WindowGuard v3.0 • <Cloud className="w-3 h-3 text-emerald-500" /> Supabase Cloud Sync Active
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">{t.scanner}</h2>
-          <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">WindowGuard v2.0 • {t.status}</p>
-        </div>
+        {history.length > 0 && (
+          <button onClick={clearHistory} className="flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-red-400 transition-colors text-xs font-bold uppercase tracking-widest">
+            <Trash2 className="w-4 h-4" /> 清空云端数据
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="glass p-8 rounded-3xl border-slate-800 bg-slate-900/40 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-4 opacity-5 group-focus-within:opacity-10 transition-opacity">
-              <Zap className="w-24 h-24" />
-            </div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">{t.inputLabel}</label>
             <textarea
-              className="w-full h-48 bg-slate-950/50 border border-slate-800 rounded-2xl p-6 focus:ring-2 focus:ring-blue-500/50 outline-none transition-all text-slate-200 placeholder:text-slate-700 text-lg leading-relaxed"
+              className="w-full h-40 bg-slate-950/50 border border-slate-800 rounded-2xl p-6 focus:ring-2 focus:ring-blue-500/50 outline-none transition-all text-slate-200 placeholder:text-slate-700 text-lg leading-relaxed"
               placeholder={t.inputPlaceholder}
               value={scenario}
               onChange={(e) => setScenario(e.target.value)}
@@ -77,11 +152,16 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
           {result && (
             <div className="glass p-8 rounded-3xl animate-in fade-in slide-in-from-bottom-4 duration-700">
                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <CheckCircle className="w-6 h-6 text-emerald-400" /> {t.cognitiveVerdict}
-                  </h3>
-                  <div className={`px-4 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-[0.2em] ${getRiskColor(result.riskLevel)}`}>
-                    {result.riskLevel} {t.riskLevel}
+                  <div>
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                      <CheckCircle className="w-6 h-6 text-emerald-400" /> {t.cognitiveVerdict}
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-widest flex items-center gap-2">
+                       <Cloud className="w-2.5 h-2.5" /> 云端同步于: {new Date(result.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className={`px-4 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-[0.2em] ${getRiskColor(result.risk_level)}`}>
+                    {result.risk_level} {t.riskLevel}
                   </div>
                </div>
                
@@ -105,7 +185,7 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
         </div>
 
         <div className="space-y-6">
-          <div className="glass p-8 rounded-3xl flex flex-col items-center bg-slate-900/40 min-h-[400px] justify-center">
+          <div className="glass p-8 rounded-3xl flex flex-col items-center bg-slate-900/40 min-h-[400px]">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-8">{t.entropyChart}</h3>
             {result ? (
               <div className="w-full h-64 scale-110">
@@ -113,13 +193,7 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                     <PolarGrid stroke="#1e293b" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
-                    <Radar
-                      name="Scan"
-                      dataKey="A"
-                      stroke="#d4af37"
-                      fill="#d4af37"
-                      fillOpacity={0.4}
-                    />
+                    <Radar name="Scan" dataKey="A" stroke="#d4af37" fill="#d4af37" fillOpacity={0.4} />
                   </RadarChart>
                 </ResponsiveContainer>
               </div>
@@ -129,26 +203,27 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
                 <p className="text-xs font-bold uppercase tracking-widest">Awaiting Pulse</p>
               </div>
             )}
-            {result && (
-              <div className="mt-8 grid grid-cols-3 w-full gap-2">
-                {radarData.map(d => (
-                  <div key={d.subject} className="text-center p-2 rounded-lg bg-slate-950/50 border border-slate-800">
-                    <p className="text-[8px] text-slate-500 uppercase font-bold">{d.subject}</p>
-                    <p className="text-sm font-bold text-slate-200">{d.A}%</p>
-                  </div>
+
+            <div className="w-full mt-10 space-y-4">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                  <History className="w-3 h-3" /> 最近云端分析
+                </h4>
+                {fetching && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+              </div>
+              <div className="space-y-2">
+                {history.map((h, i) => (
+                  <button 
+                    key={h.id || i} 
+                    onClick={() => setResult(h)}
+                    className={`w-full text-left p-3 rounded-xl border transition-all ${result?.id === h.id ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                  >
+                    <p className="text-[10px] font-bold truncate">{h.scenario}</p>
+                    <p className="text-[8px] mt-1 uppercase tracking-widest opacity-60">{new Date(h.timestamp).toLocaleDateString()} • {h.risk_level}</p>
+                  </button>
                 ))}
               </div>
-            )}
-          </div>
-
-          <div className="glass p-6 rounded-3xl bg-red-500/5 border-red-500/10">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="w-4 h-4 text-red-400" />
-              <h4 className="text-[10px] font-bold uppercase tracking-widest text-red-400">{t.exitTriggers}</h4>
             </div>
-            <p className="text-xs text-slate-500 italic leading-relaxed">
-              {t.exitTriggerDesc}
-            </p>
           </div>
         </div>
       </div>

@@ -41,6 +41,13 @@
         .animate-pulse-soft {
           animation: pulse-soft 3s infinite ease-in-out;
         }
+        .animate-spin-slow {
+          animation: spin 8s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
     </style>
 <script type="importmap">
 {
@@ -51,7 +58,8 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
     "recharts": "https://esm.sh/recharts@^3.7.0",
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "d3": "https://esm.sh/d3@^7.9.0"
+    "d3": "https://esm.sh/d3@^7.9.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.48.1"
   }
 }
 </script>
