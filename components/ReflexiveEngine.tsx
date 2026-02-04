@@ -183,6 +183,30 @@ const ReflexiveEngine: React.FC<{ lang: string }> = ({ lang }) => {
                      </p>
                      <p className="text-xs text-slate-400 italic">{result.biasWarning}</p>
                   </div>
+                  {/* Grounding Sources - Mandatory as per Gemini API rules */}
+                  {groundingLinks.length > 0 && (
+                    <div className="p-4 bg-slate-950/40 border border-slate-800 rounded-2xl space-y-3">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <ExternalLink className="w-3 h-3" /> Grounding Sources
+                      </p>
+                      <div className="space-y-2">
+                        {groundingLinks.map((chunk, i) => (
+                          chunk.web && (
+                            <a 
+                              key={i} 
+                              href={chunk.web.uri} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-[10px] text-blue-400 hover:text-blue-300 transition-colors truncate"
+                            >
+                              <LinkIcon className="w-2 h-2 shrink-0" />
+                              {chunk.web.title || chunk.web.uri}
+                            </a>
+                          )
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="py-20 text-center opacity-20">
