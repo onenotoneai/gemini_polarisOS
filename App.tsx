@@ -3,9 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Zap, Map, Library, BookOpen, LayoutDashboard, Menu, X, 
   User as UserIcon, LogOut, Globe, Activity, RefreshCw, Waves, 
-  RefreshCcw, Terminal, AlertTriangle, CheckCircle2, Loader2, Key, Database, Cloud
+  RefreshCcw, Terminal, AlertTriangle, CheckCircle2, Loader2, Key, Database, Cloud, UserCheck
 } from 'lucide-react';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import WindowGuard from './components/WindowGuard';
 import GameLab from './components/GameLab';
 import Roadmap from './components/Roadmap';
@@ -27,16 +27,16 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [lang, setLang] = useState('cn');
-  const [diagStatus, setDiagStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
-  const [diagMsg, setDiagMsg] = useState('');
   const [hasKey, setHasKey] = useState<boolean>(true);
 
   const t = translations[lang] || translations.en;
 
   useEffect(() => {
-    // 监听 Supabase 登录状态，添加 catch 防止配置错误导致的挂起
     const initSession = async () => {
       try {
+        if (!isSupabaseConfigured) {
+          throw new Error("No config");
+        }
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error) throw error;
         
@@ -49,41 +49,64 @@ const App: React.FC = () => {
             picture: u.user_metadata.avatar_url || '',
             role: 'Executive'
           });
+        } else {
+          // 如果没有登录，设置一个访客身份
+          setGuestUser();
         }
       } catch (err) {
-        console.error("Supabase Session Init Failed (Likely missing or invalid keys):", err);
+        setGuestUser();
       } finally {
         setSessionLoading(false);
       }
     };
 
+    const setGuestUser = () => {
+      setUser({
+        id: 'guest_user_local',
+        name: 'Guest Strategist',
+        email: 'guest@polaris.local',
+        picture: '',
+        role: 'Visitor'
+      });
+    };
+
     initSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        const u = session.user;
-        setUser({
-          id: u.id,
-          name: u.user_metadata.full_name || u.email?.split('@')[0] || 'Unknown User',
-          email: u.email || '',
-          picture: u.user_metadata.avatar_url || '',
-          role: 'Executive'
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    if (isSupabaseConfigured) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session) {
+          const u = session.user;
+          setUser({
+            id: u.id,
+            name: u.user_metadata.full_name || u.email?.split('@')[0] || 'Unknown User',
+            email: u.email || '',
+            picture: u.user_metadata.avatar_url || '',
+            role: 'Executive'
+          });
+        } else {
+          setGuestUser();
+        }
+      });
+      return () => subscription.unsubscribe();
+    }
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error("Logout failed", err);
-      setUser(null); // 强制本地登出
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.error("Logout failed", err);
+      }
     }
+    // 登出后重置为访客状态
+    setUser({
+      id: 'guest_user_local',
+      name: 'Guest Strategist',
+      email: 'guest@polaris.local',
+      picture: '',
+      role: 'Visitor'
+    });
   };
 
   const handleConnectKey = async () => {
@@ -91,7 +114,6 @@ const App: React.FC = () => {
     if (aistudio) {
       await aistudio.openSelectKey();
       setHasKey(true);
-      setDiagStatus('IDLE');
     }
   };
 
@@ -116,17 +138,8 @@ const App: React.FC = () => {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-blue-600/5 rounded-full blur-[120px]" />
-          <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-indigo-600/5 rounded-full blur-[120px]" />
-        </div>
-        <GoogleAuth onLogin={setUser} />
-      </div>
-    );
-  }
+  // user 永远不为 null，因为会自动回退到 guest
+  const isGuest = user?.id === 'guest_user_local';
 
   return (
     <div className="min-h-screen flex bg-[#020617] text-slate-100 selection:bg-blue-500/30">
@@ -139,7 +152,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tighter text-white">Polaris <span className="text-blue-500">OS</span></h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">Sovereign Cloud v3.0</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">Sovereign OS v3.0</p>
             </div>
           </div>
 
@@ -165,28 +178,45 @@ const App: React.FC = () => {
         </div>
 
         <div className="absolute bottom-32 left-8 right-8 cursor-pointer group">
-           <div className="p-4 glass rounded-2xl border-slate-800/60 bg-slate-900/30 group-hover:bg-slate-800/50 transition-colors">
+           <div className={`p-4 glass rounded-2xl border-slate-800/60 transition-colors ${isSupabaseConfigured && !isGuest ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-slate-900/30'}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
                    <Cloud className="w-2 h-2" /> 云端状态
                 </span>
-                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className={`flex h-1.5 w-1.5 rounded-full ${isSupabaseConfigured && !isGuest ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`}></span>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">Supabase Persistence Active</p>
+              <p className="text-[10px] text-slate-400 font-medium">
+                {isSupabaseConfigured ? (isGuest ? 'Config Ready (Auth Needed)' : 'Cloud Persistence Active') : 'Local Storage Mode'}
+              </p>
            </div>
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-8">
-          <div className="p-4 glass rounded-[1.5rem] border-slate-800/60 flex items-center gap-4">
-             <div className="w-10 h-10 rounded-full border border-slate-700 overflow-hidden shrink-0">
-               {user.picture ? <img src={user.picture} className="w-full h-full object-cover" /> : <UserIcon className="w-full h-full p-2 text-slate-500" />}
-             </div>
-             <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-white truncate">{user.name}</p>
-                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{user.role}</p>
-             </div>
-             <LogOut className="w-4 h-4 text-slate-600 hover:text-red-400 cursor-pointer transition-colors" onClick={handleLogout} />
-          </div>
+          {isGuest ? (
+            <div 
+              onClick={() => setActiveTab('sync')} // 访客点击此处去尝试登录（借用 sync 标签或弹窗）
+              className="p-4 glass rounded-[1.5rem] border-blue-500/20 bg-blue-500/5 flex items-center gap-4 cursor-pointer hover:bg-blue-500/10 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full border border-blue-500/30 flex items-center justify-center bg-slate-900 text-blue-400">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white">Sign In</p>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Enable Sync</p>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 glass rounded-[1.5rem] border-slate-800/60 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-full border border-slate-700 overflow-hidden shrink-0">
+                {user?.picture ? <img src={user.picture} className="w-full h-full object-cover" /> : <UserIcon className="w-full h-full p-2 text-slate-500" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white truncate">{user?.name}</p>
+                  <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{user?.role}</p>
+              </div>
+              <LogOut className="w-4 h-4 text-slate-600 hover:text-red-400 cursor-pointer transition-colors" onClick={handleLogout} />
+            </div>
+          )}
         </div>
       </aside>
 
@@ -217,10 +247,6 @@ const App: React.FC = () => {
                 <span>连接有效 API Key</span>
               </button>
             )}
-            <button onClick={() => setActiveTab('resonance')} className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/20 active:scale-95">
-              <Waves className="w-4 h-4" />
-              <span>{t.resonance || "Ripple Engine"}</span>
-            </button>
           </div>
         </header>
 
@@ -257,11 +283,15 @@ const App: React.FC = () => {
                             <Cloud className="w-5 h-5 text-blue-400 animate-bounce" />
                             <span className="text-[10px] font-black uppercase tracking-widest text-blue-500/80">Sovereign Data Storage v1.0</span>
                           </div>
-                          <h2 className="text-4xl font-black tracking-tighter text-white">Your Intelligence, <span className="text-blue-500">Decentralized.</span></h2>
-                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">你的所有战略扫描和权力地图现在都存储在主权云端，跨平台实时同步。</p>
+                          <h2 className="text-4xl font-black tracking-tighter text-white">Intelligence, <span className="text-blue-500">Decentralized.</span></h2>
+                          <p className="text-slate-400 max-w-lg text-lg leading-relaxed">
+                            {isSupabaseConfigured ? '检测到 Supabase 云端配置。登录后即可同步你的战略数据。' : '当前运行在本地模式。设置环境变量以启用云端同步。'}
+                          </p>
                           <div className="flex gap-4">
-                            <button onClick={() => setActiveTab('scanner')} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/30">开始云端扫描</button>
-                            <button onClick={() => setActiveTab('reflexive')} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">访问历史档案</button>
+                            <button onClick={() => setActiveTab('scanner')} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/30">开始扫描</button>
+                            {isGuest && isSupabaseConfigured && (
+                               <button onClick={() => setActiveTab('sync')} className="px-8 py-3 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl text-sm font-black uppercase tracking-widest transition-all">登录云端</button>
+                            )}
                           </div>
                         </div>
                         <Database className="absolute -right-20 -bottom-20 w-80 h-80 text-blue-500/5 -rotate-12 group-hover:text-blue-500/10 transition-colors" />
@@ -290,7 +320,15 @@ const App: React.FC = () => {
             {activeTab === 'roadmap' && <Roadmap lang={lang} />}
             {activeTab === 'library' && <CaseLibrary lang={lang} />}
             {activeTab === 'playbook' && <Playbook lang={lang} />}
-            {activeTab === 'sync' && <ProtocolSync lang={lang} />}
+            {activeTab === 'sync' && (
+              <div className="flex flex-col items-center justify-center py-20 animate-in zoom-in">
+                 {!user || isGuest ? (
+                   <GoogleAuth onLogin={setUser} />
+                 ) : (
+                   <ProtocolSync lang={lang} />
+                 )}
+              </div>
+            )}
           </div>
         </div>
       </main>

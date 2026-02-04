@@ -1,21 +1,35 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-// 尝试从多个可能的路径获取环境变量
-const rawUrl = process.env.SUPABASE_URL || (process.env as any).REACT_APP_SUPABASE_URL || "";
-const rawKey = process.env.SUPABASE_ANON_KEY || (process.env as any).REACT_APP_SUPABASE_ANON_KEY || "";
+// 增强的环境变量读取函数：支持多种命名习惯
+const findEnv = (key: string): string => {
+  const target = key.toUpperCase();
+  // 遍历所有可能的 key 名
+  const foundKey = Object.keys(process.env || {}).find(k => k.toUpperCase() === target);
+  if (foundKey) return (process.env as any)[foundKey] || "";
 
-// 核心修复：supabase-js 要求初始化时必须有有效的字符串格式
-// 如果环境变量缺失，我们提供一个符合格式的占位符，防止应用在启动阶段崩溃
-const supabaseUrl = rawUrl.trim() || "https://placeholder-project.supabase.co";
-const supabaseAnonKey = rawKey.trim() || "placeholder-key";
+  // 尝试从 window 或其他注入点获取（如果是前端构建）
+  const reactAppKey = `REACT_APP_${target}`;
+  const foundReactKey = Object.keys(process.env || {}).find(k => k.toUpperCase() === reactAppKey);
+  if (foundReactKey) return (process.env as any)[foundReactKey] || "";
 
-if (!rawUrl || !rawKey) {
-  console.warn(
-    "北极星系统警告: 检测到 Supabase 配置缺失。\n" +
-    "请在部署平台（如 Netlify）的环境变量中设置 SUPABASE_URL 和 SUPABASE_ANON_KEY。\n" +
-    "当前将以‘离线模式’运行，云端同步功能将不可用。"
-  );
+  return "";
+};
+
+const rawUrl = findEnv('SUPABASE_URL');
+const rawKey = findEnv('SUPABASE_ANON_KEY');
+
+// 只有当 URL 包含有效的 http 且 Key 存在时才视为配置成功
+export const isSupabaseConfigured = !!(rawUrl && rawUrl.startsWith('http') && rawKey);
+
+// 即使配置不正确，也提供一个合规的初始化值，防止底层库崩溃
+// 但我们会通过 isSupabaseConfigured 标志位在业务层拦截实际请求
+const supabaseUrl = isSupabaseConfigured ? rawUrl : "https://placeholder-project.supabase.co";
+const supabaseAnonKey = isSupabaseConfigured ? rawKey : "placeholder-key";
+
+if (!isSupabaseConfigured) {
+  console.warn("Polaris OS: Supabase 环境变量缺失或无效。系统将运行在【本地离线模式】。");
+  console.log("检测到的配置状况:", { url: !!rawUrl, key: !!rawKey });
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

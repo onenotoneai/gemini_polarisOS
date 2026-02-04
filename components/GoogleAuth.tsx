@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { Shield, Loader2, AlertCircle, Globe } from 'lucide-react';
-import { supabase } from '../supabaseClient';
+import { Shield, Loader2, AlertCircle, Database, ExternalLink } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 
 interface GoogleAuthProps {
   onLogin: (user: any) => void;
@@ -12,6 +12,11 @@ const GoogleAuth: React.FC<GoogleAuthProps> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const handleGoogleLogin = async () => {
+    if (!isSupabaseConfigured) {
+      setError("Cloud Config Missing: 请在 Netlify 环境变量中设置 SUPABASE_URL 和 SUPABASE_ANON_KEY。");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -28,11 +33,6 @@ const GoogleAuth: React.FC<GoogleAuthProps> = () => {
     }
   };
 
-  const handleGuestLogin = async () => {
-    // 允许通过匿名或特定测试账号进入，这里为了演示保留直接登录 UI，但底层建议通过 Supabase 处理
-    alert("Guest mode works locally, but cloud sync requires Google Sign-in.");
-  };
-
   return (
     <div className="flex flex-col items-center space-y-8 p-12 glass rounded-[2.5rem] border-slate-700/50 shadow-2xl relative overflow-hidden max-w-md w-full animate-in zoom-in duration-700">
       <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-indigo-600/5 -z-10" />
@@ -43,10 +43,29 @@ const GoogleAuth: React.FC<GoogleAuthProps> = () => {
 
       <div className="text-center space-y-2">
         <h1 className="text-3xl font-extrabold tracking-tight text-white">Polaris OS</h1>
-        <p className="text-slate-400 text-sm font-medium">Cognitive Operating System • Cloud Enabled</p>
+        <p className="text-slate-400 text-sm font-medium">Cognitive Operating System • Cloud v3.0</p>
       </div>
 
       <div className="w-full space-y-4">
+        {!isSupabaseConfigured && (
+          <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-3">
+            <div className="flex items-center gap-2 text-amber-500">
+              <Database className="w-5 h-5" />
+              <p className="text-xs font-black uppercase tracking-widest">需要云端配置</p>
+            </div>
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              检测到未连接 Supabase。请前往 Netlify 设置环境变量以启用云同步功能。
+            </p>
+            <a 
+              href="https://supabase.com" 
+              target="_blank" 
+              className="flex items-center justify-between p-2 bg-slate-900/50 rounded-lg text-[10px] text-slate-300 hover:text-white transition-colors"
+            >
+              获取 Supabase 密钥 <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        )}
+
         {error && (
           <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
@@ -56,8 +75,8 @@ const GoogleAuth: React.FC<GoogleAuthProps> = () => {
 
         <button 
           onClick={handleGoogleLogin}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-4 py-4 bg-white hover:bg-slate-100 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-900 transition-all shadow-xl shadow-white/5 disabled:opacity-50"
+          disabled={loading || !isSupabaseConfigured}
+          className="w-full flex items-center justify-center gap-4 py-4 bg-white hover:bg-slate-100 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-900 transition-all shadow-xl shadow-white/5 disabled:opacity-30"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
             <svg className="w-4 h-4" viewBox="0 0 24 24">

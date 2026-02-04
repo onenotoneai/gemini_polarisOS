@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { analyzeRisk } from '../geminiService';
-import { supabase } from '../supabaseClient';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { Shield, AlertTriangle, CheckCircle, Loader2, ArrowRight, Zap, History, Trash2, Cloud } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
 import { translations } from '../i18n';
@@ -15,30 +15,42 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
 
   const t = translations[lang] || translations.en;
 
-  // 从 Supabase 加载历史记录
-  const fetchHistory = async () => {
+  // 初始化加载
+  const initData = async () => {
     setFetching(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('scans')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('timestamp', { ascending: false })
-      .limit(10);
-
-    if (error) {
-      console.error("Supabase fetch error:", error);
-    } else if (data) {
-      setHistory(data);
-      if (!result && data.length > 0) setResult(data[0]);
+    let cloudData = [];
+    
+    // 尝试云端
+    if (isSupabaseConfigured) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('scans')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('timestamp', { ascending: false })
+            .limit(10);
+          if (!error && data) cloudData = data;
+        }
+      } catch (e) {}
     }
+
+    // 合并本地（如果是访客或云端失败）
+    const local = localStorage.getItem('polaris_scans_local');
+    const localData = local ? JSON.parse(local) : [];
+    
+    const combined = [...cloudData, ...localData]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 10);
+
+    setHistory(combined);
+    if (combined.length > 0 && !result) setResult(combined[0]);
     setFetching(false);
   };
 
   useEffect(() => {
-    fetchHistory();
+    initData();
   }, []);
 
   const handleScan = async () => {
@@ -46,12 +58,16 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
     setLoading(true);
     try {
       const data = await analyzeRisk(scenario);
-      const { data: { user } } = await supabase.auth.getUser();
+      let sessionUser = null;
       
-      if (!user) throw new Error("User not found");
+      if (isSupabaseConfigured) {
+        const { data: { user } } = await supabase.auth.getUser();
+        sessionUser = user;
+      }
 
-      const newScanRecord = {
-        user_id: user.id,
+      const newRecord = {
+        id: sessionUser ? undefined : `local_${Date.now()}`,
+        timestamp: new Date().toISOString(),
         scenario: scenario,
         axes: data.axes,
         risk_level: data.riskLevel,
@@ -59,38 +75,42 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
         recommendations: data.recommendations
       };
 
-      // 写入 Supabase
-      const { data: savedData, error } = await supabase
-        .from('scans')
-        .insert([newScanRecord])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setResult(savedData);
-      setHistory(prev => [savedData, ...prev].slice(0, 10));
+      if (sessionUser) {
+        // 保存到云端
+        const { data: savedData, error } = await supabase
+          .from('scans')
+          .insert([{ ...newRecord, user_id: sessionUser.id }])
+          .select()
+          .single();
+        if (!error && savedData) {
+          setResult(savedData);
+          setHistory(prev => [savedData, ...prev].slice(0, 10));
+        }
+      } else {
+        // 保存到本地
+        const updatedLocal = [newRecord, ...history].slice(0, 10);
+        localStorage.setItem('polaris_scans_local', JSON.stringify(updatedLocal));
+        setResult(newRecord);
+        setHistory(updatedLocal);
+      }
     } catch (error) {
-      console.error("Scan/Save failed:", error);
+      console.error("Scan failed:", error);
     } finally {
       setLoading(false);
     }
   };
 
   const clearHistory = async () => {
-    if (window.confirm("确定要永久删除云端所有扫描记忆吗？")) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      
-      const { error } = await supabase
-        .from('scans')
-        .delete()
-        .eq('user_id', user.id);
-
-      if (!error) {
-        setHistory([]);
-        setResult(null);
+    if (window.confirm("确定要清空所有扫描记忆吗？")) {
+      if (isSupabaseConfigured) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('scans').delete().eq('user_id', user.id);
+        }
       }
+      localStorage.removeItem('polaris_scans_local');
+      setHistory([]);
+      setResult(null);
     }
   };
 
@@ -102,7 +122,7 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
 
   const getRiskColor = (level: string) => {
     switch (level) {
-      case 'HIGH': return 'text-red-400 bg-red-400/10 border-red-400/20 shadow-[0_0_10px_rgba(239,68,68,0.2)]';
+      case 'HIGH': return 'text-red-400 bg-red-400/10 border-red-400/20';
       case 'MEDIUM': return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
       case 'LOW': return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
       default: return '';
@@ -119,13 +139,13 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
           <div>
             <h2 className="text-3xl font-bold tracking-tight text-white">{t.scanner}</h2>
             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2">
-               WindowGuard v3.0 • <Cloud className="w-3 h-3 text-emerald-500" /> Supabase Cloud Sync Active
+               WindowGuard v3.0 • {isSupabaseConfigured ? <span className="flex items-center gap-1 text-emerald-500"><Cloud className="w-3 h-3" /> Cloud Sync </span> : <span className="text-slate-600">Local Only</span>}
             </p>
           </div>
         </div>
         {history.length > 0 && (
           <button onClick={clearHistory} className="flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-red-400 transition-colors text-xs font-bold uppercase tracking-widest">
-            <Trash2 className="w-4 h-4" /> 清空云端数据
+            <Trash2 className="w-4 h-4" /> 清空数据
           </button>
         )}
       </div>
@@ -156,8 +176,8 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
                     <h3 className="text-xl font-bold text-white flex items-center gap-2">
                       <CheckCircle className="w-6 h-6 text-emerald-400" /> {t.cognitiveVerdict}
                     </h3>
-                    <p className="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-widest flex items-center gap-2">
-                       <Cloud className="w-2.5 h-2.5" /> 云端同步于: {new Date(result.timestamp).toLocaleString()}
+                    <p className="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-widest">
+                       时间: {new Date(result.timestamp).toLocaleString()}
                     </p>
                   </div>
                   <div className={`px-4 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-[0.2em] ${getRiskColor(result.risk_level)}`}>
@@ -207,7 +227,7 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
             <div className="w-full mt-10 space-y-4">
               <div className="flex justify-between items-center">
                 <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                  <History className="w-3 h-3" /> 最近云端分析
+                  <History className="w-3 h-3" /> 最近记录
                 </h4>
                 {fetching && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
               </div>
@@ -216,10 +236,12 @@ const WindowGuard: React.FC<{ lang: string }> = ({ lang }) => {
                   <button 
                     key={h.id || i} 
                     onClick={() => setResult(h)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all ${result?.id === h.id ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                    className={`w-full text-left p-3 rounded-xl border transition-all ${result?.timestamp === h.timestamp ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:border-slate-700'}`}
                   >
                     <p className="text-[10px] font-bold truncate">{h.scenario}</p>
-                    <p className="text-[8px] mt-1 uppercase tracking-widest opacity-60">{new Date(h.timestamp).toLocaleDateString()} • {h.risk_level}</p>
+                    <p className="text-[8px] mt-1 uppercase tracking-widest opacity-60">
+                      {new Date(h.timestamp).toLocaleDateString()} • {h.risk_level} {h.id?.toString().startsWith('local') ? '(Local)' : '(Cloud)'}
+                    </p>
                   </button>
                 ))}
               </div>
