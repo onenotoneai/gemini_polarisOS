@@ -2,68 +2,84 @@
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 极简混淆工具：Base64 编码/解码
- * 防止肉眼直接在 localStorage 看到敏感 Key
+ * 北极星系统特制加密（System Cipher）
+ * 使用 XOR 混淆 + Base64，防止明文和标准 Base64 窥探
  */
-const encode = (str: string) => {
-  try { return btoa(encodeURIComponent(str)); } catch(e) { return str; }
+const SYSTEM_SALT = "POLARIS_SOVEREIGN_2026";
+
+const crypt = (str: string): string => {
+  const textToChars = (text: string) => text.split("").map((c) => c.charCodeAt(0));
+  const byteHex = (n: any) => ("0" + Number(n).toString(16)).slice(-2);
+  const applySaltToChar = (code: any) => textToChars(SYSTEM_SALT).reduce((a, b) => a ^ b, code);
+
+  return str
+    .split("")
+    .map(textToChars)
+    .map(applySaltToChar)
+    .map(byteHex)
+    .join("");
 };
 
-const decode = (str: string | null) => {
-  if (!str) return "";
-  try { return decodeURIComponent(atob(str)); } catch(e) { return str; }
-};
-
-// 获取配置：优先本地存储(混淆) > 环境变量(明文)
-const getStoredConfig = () => {
-  const storedUrl = localStorage.getItem('polaris_db_url_v2');
-  const storedKey = localStorage.getItem('polaris_db_key_v2');
+const decrypt = (encoded: string | null): string => {
+  if (!encoded) return "";
+  const textToChars = (text: string) => text.split("").map((c) => c.charCodeAt(0));
+  const applySaltToChar = (code: any) => textToChars(SYSTEM_SALT).reduce((a, b) => a ^ b, code);
   
-  const url = storedUrl ? decode(storedUrl) : (process.env.SUPABASE_URL || "").trim();
-  const key = storedKey ? decode(storedKey) : (process.env.SUPABASE_ANON_KEY || "").trim();
+  const matches = encoded.match(/.{1,2}/g);
+  if (!matches) return "";
+  
+  return matches
+    .map((hex) => parseInt(hex, 16))
+    .map(applySaltToChar)
+    .map((charCode) => String.fromCharCode(charCode))
+    .join("");
+};
+
+// 获取配置：优先本地加密存储 > 环境变量
+const getStoredConfig = () => {
+  const storedUrl = localStorage.getItem('polaris_vault_url');
+  const storedKey = localStorage.getItem('polaris_vault_key');
+  
+  const url = storedUrl ? decrypt(storedUrl) : (process.env.SUPABASE_URL || "").trim();
+  const key = storedKey ? decrypt(storedKey) : (process.env.SUPABASE_ANON_KEY || "").trim();
   
   return { url, key };
 };
 
 let { url, key } = getStoredConfig();
 
-// 验证配置是否有效
 export const isSupabaseConfigured = () => {
   const { url, key } = getStoredConfig();
   return !!(url && url.startsWith('http') && key);
 };
 
-// 导出一个可随时更新的客户端实例
+// 重新初始化客户端
 export let supabase = createClient(
   url || "https://placeholder.supabase.co", 
   key || "placeholder"
 );
 
 /**
- * 动态更新配置并掩码保存
+ * 动态更新并加密保存配置
  */
 export const updateSupabaseConfig = (newUrl: string, newKey: string) => {
-  localStorage.setItem('polaris_db_url_v2', encode(newUrl.trim()));
-  localStorage.setItem('polaris_db_key_v2', encode(newKey.trim()));
+  localStorage.setItem('polaris_vault_url', crypt(newUrl.trim()));
+  localStorage.setItem('polaris_vault_key', crypt(newKey.trim()));
   
-  // 重新初始化客户端
+  // 实时刷新客户端实例
   supabase = createClient(newUrl.trim(), newKey.trim());
   return true;
 };
 
 /**
- * 检查数据库连接状态
+ * 验证数据库连通性
  */
 export const checkSupabaseConnection = async () => {
   if (!isSupabaseConfigured()) return false;
   try {
-    // 探测 scans 表
     const { data, error } = await supabase.from('scans').select('count', { count: 'exact', head: true }).limit(1);
-    
-    // 如果返回 401/403 通常也说明 URL 是通的，只是鉴权没过，但这足以证明网络连通性
-    // Fix: Cast error to any to access status property which is not on PostgrestError type
+    // 如果返回 401 说明 URL 正确但 Key 或权限有问题，也视为有效连接（至少证明了 URL 是正确的）
     if (error && (error.code === 'PGRST301' || (error as any).status === 401)) return true;
-    
     return !error;
   } catch (e) {
     return false;
