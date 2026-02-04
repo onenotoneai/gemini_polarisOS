@@ -16,8 +16,8 @@ const findEnv = (key: string): string => {
   return "";
 };
 
-const rawUrl = findEnv('SUPABASE_URL');
-const rawKey = findEnv('SUPABASE_ANON_KEY');
+const rawUrl = "https://lgxmkezepxzxcofadcay.supabase.co";
+const rawKey = "sb_publishable_MJZFASuMALHfpwlYYjStYw_CL4Wr3fi";
 
 // 只有当 URL 包含有效的 http 且 Key 存在时才视为配置成功
 export const isSupabaseConfigured = !!(rawUrl && rawUrl.startsWith('http') && rawKey);
