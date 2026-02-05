@@ -3,19 +3,19 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Zap, Map, Library, BookOpen, LayoutDashboard, Menu, X, 
   User as UserIcon, LogOut, Globe, Activity, RefreshCw, Waves, 
-  RefreshCcw, Terminal, AlertTriangle, CheckCircle2, Loader2, Key, Database, Cloud, UserCheck, Settings
+  RefreshCcw, Terminal, AlertTriangle, CheckCircle2, Loader2, Key, Database, Cloud, UserCheck, Settings, Server, Cpu
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured, checkSupabaseConnection } from './supabaseClient';
-import WindowGuard from './components/WindowGuard';
-import GameLab from './components/GameLab';
-import Roadmap from './components/Roadmap';
-import CaseLibrary from './components/CaseLibrary';
-import Playbook from './components/Playbook';
-import ProtocolSync from './components/ProtocolSync';
-import GlobalResonance from './components/GlobalResonance';
-import ReflexiveEngine from './components/ReflexiveEngine';
-import { User } from './types';
-import { translations } from './i18n';
+import { supabase, isSupabaseConfigured, checkSupabaseConnection } from './supabaseClient.ts';
+import WindowGuard from './components/WindowGuard.tsx';
+import GameLab from './components/GameLab.tsx';
+import Roadmap from './components/Roadmap.tsx';
+import CaseLibrary from './components/CaseLibrary.tsx';
+import Playbook from './components/Playbook.tsx';
+import ProtocolSync from './components/ProtocolSync.tsx';
+import GlobalResonance from './components/GlobalResonance.tsx';
+import ReflexiveEngine from './components/ReflexiveEngine.tsx';
+import { User } from './types.ts';
+import { translations } from './i18n.ts';
 
 type Tab = 'dashboard' | 'scanner' | 'gamelab' | 'roadmap' | 'library' | 'playbook' | 'sync' | 'resonance' | 'reflexive';
 
@@ -25,19 +25,18 @@ const App: React.FC = () => {
   const [sessionLoading, setSessionLoading] = useState(true);
   const [isDbAlive, setIsDbAlive] = useState(false);
   const [lang, setLang] = useState('cn');
+  const [nodeAddress, setNodeAddress] = useState('LOCAL_HOST');
   
-  const user: User = {
-    id: 'admin_sovereign',
-    name: 'Sovereign Administrator',
-    email: 'admin@polaris.os',
-    picture: '',
-    role: 'Executive'
-  };
-
   const t = translations[lang] || translations.en;
 
   useEffect(() => {
     const initApp = async () => {
+      if (window.location.hostname.includes('myqcloud.com')) {
+        setNodeAddress(`COS_NODE_${window.location.hostname.split('.')[0].toUpperCase()}`);
+      } else {
+        setNodeAddress(window.location.hostname.toUpperCase());
+      }
+
       try {
         const alive = await checkSupabaseConnection();
         setIsDbAlive(alive);
@@ -66,7 +65,7 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center space-y-4">
         <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
-        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Booting Sovereign Kernel...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 animate-pulse">Booting Sovereign Kernel...</p>
       </div>
     );
   }
@@ -107,7 +106,7 @@ const App: React.FC = () => {
             <div className={`p-4 glass rounded-2xl border-slate-800/60 ${isDbAlive ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-red-950/10 border-red-500/20'}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
-                   <Database className="w-2 h-2" /> 云端集成
+                   <Database className="w-2 h-2" /> 云端状态
                 </span>
                 <span className={`flex h-1.5 w-1.5 rounded-full ${isDbAlive ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
               </div>
@@ -133,7 +132,7 @@ const App: React.FC = () => {
         <header className="h-20 glass border-b border-slate-800/60 flex items-center justify-between px-10 shrink-0 relative z-20">
           <div className="flex items-center space-x-6">
              <div className="flex items-center px-4 py-1.5 bg-emerald-500/5 text-emerald-500 border border-emerald-500/10 rounded-full text-[10px] font-black uppercase tracking-widest">
-               <Zap className="w-3 h-3 mr-2" /> 系统主权已确认
+               <Server className="w-3 h-3 mr-2" /> Node: {nodeAddress}
              </div>
              {!isDbAlive && (
                <div className="flex items-center px-4 py-1.5 bg-amber-500/5 text-amber-500 border border-amber-500/10 rounded-full text-[10px] font-black uppercase tracking-widest">
@@ -158,17 +157,35 @@ const App: React.FC = () => {
               <div className="space-y-10 animate-in fade-in duration-700">
                 <div className="glass p-10 rounded-[2.5rem] bg-gradient-to-br from-blue-600/10 to-transparent border-slate-800/60 relative overflow-hidden">
                    <div className="relative z-10">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] font-black text-blue-400 uppercase tracking-widest mb-6">
+                      <Cpu className="w-3 h-3" /> Core Kernel v3.0.4-LTS
+                    </div>
                     <h2 className="text-4xl font-black text-white mb-4">Master Session Active</h2>
                     <p className="text-slate-400 text-lg max-w-2xl leading-relaxed">
-                      欢迎使用北极星操作系统。云端存储状态：<span className={isDbAlive ? "text-emerald-400" : "text-amber-400"}>{isDbAlive ? "同步中" : "仅本地"}</span>。
-                      所有决策推演已解锁。
+                      欢迎使用北极星操作系统。云端存储状态：<span className={isDbAlive ? "text-emerald-400" : "text-amber-400"}>{isDbAlive ? "已同步 (Cloud)" : "仅离线模式 (Local)"}</span>。
+                      所有决策推演模块已在节点 <span className="text-blue-400 font-mono">{nodeAddress}</span> 就绪。
                     </p>
                     <div className="flex gap-4 mt-8">
-                      <button onClick={() => setActiveTab('scanner')} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/20">开始扫描</button>
-                      <button onClick={() => setActiveTab('sync')} className="px-8 py-3 glass hover:bg-slate-800 rounded-2xl text-xs font-black uppercase tracking-widest transition-all">内核配置</button>
+                      <button onClick={() => setActiveTab('scanner')} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-900/20">开始战略扫描</button>
+                      <button onClick={() => setActiveTab('sync')} className="px-8 py-3 glass hover:bg-slate-800 rounded-2xl text-xs font-black uppercase tracking-widest transition-all">内核/数据库设置</button>
                     </div>
                    </div>
                    <Shield className="absolute -right-20 -bottom-20 w-80 h-80 text-white/5 -rotate-12" />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   <div className="glass p-6 rounded-3xl border-slate-800/60">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">部署架构</p>
+                      <p className="text-lg font-bold text-white">Sovereign Static Node</p>
+                   </div>
+                   <div className="glass p-6 rounded-3xl border-slate-800/60">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">当前算力</p>
+                      <p className="text-lg font-bold text-white">Gemini 3 Pro + D3.js</p>
+                   </div>
+                   <div className="glass p-6 rounded-3xl border-slate-800/60">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">数据主权</p>
+                      <p className="text-lg font-bold text-white">{isDbAlive ? "Supabase Vault" : "Browser LocalStorage"}</p>
+                   </div>
                 </div>
               </div>
             )}

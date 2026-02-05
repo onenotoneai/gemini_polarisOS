@@ -1,10 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-/**
- * 北极星系统特制加密（System Cipher）
- * 使用 XOR 混淆 + Base64，防止明文和标准 Base64 窥探
- */
 const SYSTEM_SALT = "POLARIS_SOVEREIGN_2026";
 
 const crypt = (str: string): string => {
@@ -35,50 +31,42 @@ const decrypt = (encoded: string | null): string => {
     .join("");
 };
 
-// 获取配置：优先本地加密存储 > 环境变量
 const getStoredConfig = () => {
   const storedUrl = localStorage.getItem('polaris_vault_url');
   const storedKey = localStorage.getItem('polaris_vault_key');
   
-  const url = storedUrl ? decrypt(storedUrl) : (process.env.SUPABASE_URL || "").trim();
-  const key = storedKey ? decrypt(storedKey) : (process.env.SUPABASE_ANON_KEY || "").trim();
+  const url = storedUrl ? decrypt(storedUrl) : (typeof process !== 'undefined' ? process.env.SUPABASE_URL : (window as any).SUPABASE_URL) || "";
+  const key = storedKey ? decrypt(storedKey) : (typeof process !== 'undefined' ? process.env.SUPABASE_ANON_KEY : (window as any).SUPABASE_ANON_KEY) || "";
   
-  return { url, key };
+  return { 
+    url: url?.trim() || "", 
+    key: key?.trim() || "" 
+  };
 };
-
-let { url, key } = getStoredConfig();
 
 export const isSupabaseConfigured = () => {
   const { url, key } = getStoredConfig();
   return !!(url && url.startsWith('http') && key);
 };
 
-// 重新初始化客户端
+let config = getStoredConfig();
+
 export let supabase = createClient(
-  url || "https://placeholder.supabase.co", 
-  key || "placeholder"
+  config.url || "https://placeholder.supabase.co", 
+  config.key || "placeholder"
 );
 
-/**
- * 动态更新并加密保存配置
- */
 export const updateSupabaseConfig = (newUrl: string, newKey: string) => {
   localStorage.setItem('polaris_vault_url', crypt(newUrl.trim()));
   localStorage.setItem('polaris_vault_key', crypt(newKey.trim()));
-  
-  // 实时刷新客户端实例
   supabase = createClient(newUrl.trim(), newKey.trim());
   return true;
 };
 
-/**
- * 验证数据库连通性
- */
 export const checkSupabaseConnection = async () => {
   if (!isSupabaseConfigured()) return false;
   try {
-    const { data, error } = await supabase.from('scans').select('count', { count: 'exact', head: true }).limit(1);
-    // 如果返回 401 说明 URL 正确但 Key 或权限有问题，也视为有效连接（至少证明了 URL 是正确的）
+    const { error } = await supabase.from('scans').select('count', { count: 'exact', head: true }).limit(1);
     if (error && (error.code === 'PGRST301' || (error as any).status === 401)) return true;
     return !error;
   } catch (e) {

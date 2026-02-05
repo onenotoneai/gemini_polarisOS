@@ -1,13 +1,15 @@
 
-import React, { useState } from 'react';
-import { Database, Key, Save, CheckCircle2, AlertTriangle, RefreshCw, Server, ShieldCheck, Lock, Eye, EyeOff } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Database, Key, Save, CheckCircle2, AlertTriangle, RefreshCw, ShieldCheck, Lock, Eye, EyeOff, Cpu, Wifi, WifiOff } from 'lucide-react';
 import { updateSupabaseConfig, isSupabaseConfigured, checkSupabaseConnection } from '../supabaseClient';
+import { testApiKeyConnectivity } from '../geminiService';
 
 const ProtocolSync: React.FC<{ lang: string }> = ({ lang }) => {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [status, setStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [aiStatus, setAiStatus] = useState<{testing: boolean, result: string | null, ok: boolean | null}>({testing: false, result: null, ok: null});
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleSave = async () => {
@@ -26,7 +28,6 @@ const ProtocolSync: React.FC<{ lang: string }> = ({ lang }) => {
       
       if (isAlive) {
         setStatus('success');
-        // 延迟刷新以确保状态持久化
         setTimeout(() => window.location.reload(), 1000);
       } else {
         setStatus('error');
@@ -36,6 +37,12 @@ const ProtocolSync: React.FC<{ lang: string }> = ({ lang }) => {
       setStatus('error');
       setErrorMsg(err.message || '内核初始化冲突');
     }
+  };
+
+  const runAiDiagnostic = async () => {
+    setAiStatus({testing: true, result: null, ok: null});
+    const res = await testApiKeyConnectivity();
+    setAiStatus({testing: false, result: res.message, ok: res.success});
   };
 
   return (
@@ -48,75 +55,99 @@ const ProtocolSync: React.FC<{ lang: string }> = ({ lang }) => {
         <p className="text-slate-500 text-sm italic">配置将通过 XOR 字节流加密存储。即便物理层面暴露，Key 依然保持主权安全。</p>
       </div>
 
-      <div className="glass p-8 rounded-[2.5rem] border-slate-800 bg-slate-900/40 space-y-8">
-        <div className="space-y-3">
-          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-            <span className="flex items-center gap-2"><Database className="w-3 h-3" /> Supabase Endpoint</span>
-            {isSupabaseConfigured() && <span className="text-blue-500 flex items-center gap-1"><Lock className="w-2 h-2" /> Encrypted</span>}
-          </label>
-          <input 
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://your-id.supabase.co"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-4 text-sm text-slate-200 outline-none focus:border-blue-500/50 transition-all font-mono shadow-inner"
-          />
+      <div className="space-y-6">
+        {/* Supabase Config Section */}
+        <div className="glass p-8 rounded-[2.5rem] border-slate-800 bg-slate-900/40 space-y-8">
+          <div className="flex items-center gap-2 mb-2">
+            <Database className="w-4 h-4 text-blue-500" />
+            <h3 className="text-sm font-black text-white uppercase tracking-wider">数据库持久化配置</h3>
+          </div>
+          
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+              <span>Supabase Endpoint</span>
+              {isSupabaseConfigured() && <span className="text-blue-500 flex items-center gap-1"><Lock className="w-2 h-2" /> Encrypted</span>}
+            </label>
+            <input 
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://your-id.supabase.co"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-4 text-sm text-slate-200 outline-none focus:border-blue-500/50 transition-all font-mono shadow-inner"
+            />
+          </div>
+
+          <div className="space-y-3 relative">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+               <span>Sovereign Private Key</span>
+               <button onClick={() => setShowKey(!showKey)} className="text-slate-600 hover:text-slate-400 transition-colors">
+                  {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+               </button>
+            </label>
+            <textarea 
+              rows={3}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="在此粘贴你的 anon/public key..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-4 text-xs text-slate-400 outline-none focus:border-blue-500/50 transition-all font-mono leading-relaxed resize-none"
+              style={!showKey ? { WebkitTextSecurity: 'disc' } as any : {}}
+            />
+          </div>
+
+          {status === 'error' && (
+            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3">
+              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <p className="text-[10px] text-red-400 font-bold leading-normal">{errorMsg}</p>
+            </div>
+          )}
+
+          <button 
+            onClick={handleSave}
+            disabled={status === 'testing' || !url || !key}
+            className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all shadow-2xl shadow-blue-900/30 flex items-center justify-center gap-3 group"
+          >
+            {status === 'testing' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            <span>{status === 'testing' ? '正在对齐协议...' : '注入数据库内核'}</span>
+          </button>
         </div>
 
-        <div className="space-y-3 relative">
-          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-             <span className="flex items-center gap-2"><Key className="w-3 h-3" /> Sovereign Private Key</span>
-             <button onClick={() => setShowKey(!showKey)} className="text-slate-600 hover:text-slate-400 transition-colors">
-                {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-             </button>
-          </label>
-          {/* Fix: removed invalid 'type' prop from textarea. Used style with WebkitTextSecurity for masking password characters. */}
-          <textarea 
-            rows={4}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="在此粘贴你的 anon/public key..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-4 text-xs text-slate-400 outline-none focus:border-blue-500/50 transition-all font-mono leading-relaxed resize-none"
-            style={!showKey ? { WebkitTextSecurity: 'disc' } as any : {}}
-          />
+        {/* AI Diagnostics Section */}
+        <div className="glass p-8 rounded-[2.5rem] border-slate-800 bg-slate-900/40">
+           <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-purple-500" />
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">AI 连通性测试</h3>
+              </div>
+              <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${aiStatus.ok ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+                {aiStatus.ok ? 'Online' : 'Pending'}
+              </div>
+           </div>
+
+           <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl mb-6">
+              <p className="text-[10px] text-slate-500 font-medium mb-1 uppercase tracking-widest">诊断输出:</p>
+              <div className="text-[11px] font-mono text-slate-300 break-words leading-relaxed min-h-[40px]">
+                {aiStatus.testing ? (
+                  <span className="flex items-center gap-2 text-blue-400"><RefreshCw className="w-3 h-3 animate-spin" /> 正在向 Gemini 集群发起握手请求...</span>
+                ) : (
+                  aiStatus.result || "等待执行诊断程序..."
+                )}
+              </div>
+           </div>
+
+           <button 
+            onClick={runAiDiagnostic}
+            disabled={aiStatus.testing}
+            className={`w-full py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 ${
+              aiStatus.ok === true ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+            }`}
+           >
+             {aiStatus.ok ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+             <span>运行 AI 握手诊断</span>
+           </button>
+           <p className="mt-4 text-[9px] text-slate-600 text-center uppercase tracking-widest font-bold">
+             注：若诊断失败，请检查 index.html 中的 API Key。
+           </p>
         </div>
-
-        {status === 'error' && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3">
-            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-            <p className="text-[10px] text-red-400 font-bold leading-normal">{errorMsg}</p>
-          </div>
-        )}
-
-        {status === 'success' && (
-          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            <p className="text-[10px] text-emerald-400 font-black uppercase tracking-widest">认证通过，正在重启主权内核...</p>
-          </div>
-        )}
-
-        <button 
-          onClick={handleSave}
-          disabled={status === 'testing' || !url || !key}
-          className="w-full py-5 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all shadow-2xl shadow-blue-900/30 flex items-center justify-center gap-3 group"
-        >
-          {status === 'testing' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 group-hover:scale-110 transition-transform" />}
-          <span>{status === 'testing' ? '正在执行握手协议...' : '保存并注入内核'}</span>
-        </button>
-      </div>
-
-      <div className="mt-10 flex flex-col items-center gap-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-slate-800 text-[8px] font-black text-slate-600 uppercase">
-             Algorithm: XOR-System-Cipher
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-slate-800 text-[8px] font-black text-slate-600 uppercase">
-             Storage: Local Vault
-          </div>
-        </div>
-        <p className="text-[9px] text-slate-700 text-center max-w-sm leading-relaxed uppercase tracking-widest font-bold">
-          Polaris OS 不会向第三方服务器发送您的密钥，一切处理仅在本地浏览器沙箱内完成。
-        </p>
       </div>
     </div>
   );

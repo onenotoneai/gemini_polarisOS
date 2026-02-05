@@ -3,51 +3,46 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { RiskLevel } from "./types";
 
 const getAIInstance = () => {
-  // Always use process.env.API_KEY directly as per guidelines.
-  // The client must be initialized with new GoogleGenAI({ apiKey: process.env.API_KEY }).
-  return new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  const apiKey = (typeof process !== 'undefined' && process.env.API_KEY) 
+    ? process.env.API_KEY 
+    : (window as any).API_KEY;
+  
+  // 检查是否仍然是占位符字符串
+  if (!apiKey || apiKey.includes("在此填入")) {
+    return null;
+  }
+  
+  return new GoogleGenAI({ apiKey });
 };
 
-/**
- * 诊断工具：检查 API 密钥是否有效。
- */
 export const testApiKeyConnectivity = async () => {
+  const ai = getAIInstance();
+  if (!ai) {
+    return { 
+      success: false, 
+      message: "本地内核未检测到有效的 API Key。请在 index.html 的 window.API_KEY 中填入你的密钥。" 
+    };
+  }
+
   try {
-    const ai = getAIInstance();
-    // 使用规范定义的 Flash Lite 模型进行探测
     const response = await ai.models.generateContent({
-      model: 'gemini-flash-lite-latest',
-      contents: "Diagnostic Ping. Reply with 'OK'.",
+      model: 'gemini-3-flash-preview',
+      contents: "Diagnostic Ping. Reply with 'POLARIS_READY'.",
     });
     return { success: true, message: response.text || "Connection established." };
   } catch (error: any) {
     console.error("Diagnostic Error:", error);
-    
-    let userFriendlyMsg = error.message || "Unknown connectivity error";
-    let shouldResetKey = false;
-
-    // 捕获 Requested entity was not found (404)
-    if (userFriendlyMsg.includes("Requested entity was not found") || error.status === 404) {
-      userFriendlyMsg = "错误 404: 找不到请求的模型或 API Key 权限不足。请确保选择了开启计费的 Paid Project 并重新授权。";
-      shouldResetKey = true;
-    } 
-    else if (userFriendlyMsg.includes("API key not valid") || error.status === 400) {
-      userFriendlyMsg = "API Key 无效。请检查部署平台的环境变量或重新连接。";
-      shouldResetKey = true;
-    }
-
-    return { 
-      success: false, 
-      message: userFriendlyMsg,
-      shouldResetKey: shouldResetKey,
-      status: error.status || "FAILED"
-    };
+    let msg = error.message || "Unknown error";
+    if (msg.includes("API key not valid")) msg = "API Key 无效，请重新核对。";
+    if (msg.includes("404")) msg = "模型未找到或 API 权限不足。";
+    return { success: false, message: msg };
   }
 };
 
 export const analyzeRisk = async (scenario: string) => {
   const ai = getAIInstance();
-  // Complex Reasoning Task: upgraded to gemini-3-pro-preview
+  if (!ai) throw new Error("AI_KEY_MISSING");
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: `You are the Polaris OS Cognitive Engine. Analyze this scenario using the "Structural Aversion Playbook" framework.
@@ -83,7 +78,8 @@ export const analyzeRisk = async (scenario: string) => {
 
 export const analyzeGlobalResonance = async (event: string) => {
   const ai = getAIInstance();
-  // Complex Reasoning Task: upgraded to gemini-3-pro-preview
+  if (!ai) throw new Error("AI_KEY_MISSING");
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: `As the Polaris Global Intelligence Engine, analyze this global event: "${event}".
@@ -119,7 +115,8 @@ export const analyzeGlobalResonance = async (event: string) => {
 
 export const calibrateProtocol = async (prediction: any, reality: string) => {
   const ai = getAIInstance();
-  // Complex Reasoning Task with Google Search: upgraded to gemini-3-pro-preview
+  if (!ai) throw new Error("AI_KEY_MISSING");
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: `CALIBRATION SESSION:
@@ -162,7 +159,8 @@ export const calibrateProtocol = async (prediction: any, reality: string) => {
 
 export const analyzePowerDynamics = async (actors: any[], relationships: any[]) => {
   const ai = getAIInstance();
-  // Complex Reasoning Task: upgraded to gemini-3-pro-preview
+  if (!ai) throw new Error("AI_KEY_MISSING");
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: `Analyze power dynamics: ${JSON.stringify({actors, relationships})}`,
